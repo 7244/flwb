@@ -77,21 +77,13 @@ struct flwb_t{
     T consume_confident(){
       auto c = __atomic_fetch_add(&consumer, 1, __ATOMIC_SEQ_CST);
 
-      #if defined(__i386__) || defined(__x86_64__)
-        auto d = __atomic_load_n(&at_wrap(data, c), __ATOMIC_SEQ_CST);
-        if(__builtin_expect(d == invalid, false)){
-          while((d = __atomic_exchange_n(&at_wrap(data, c), invalid, __ATOMIC_SEQ_CST)) == invalid){
-            // its almost impossible to come here. so no relax needed.
-          }
+      while(1){
+        auto d = __atomic_exchange_n(&at_wrap(data, c), invalid, __ATOMIC_SEQ_CST);
+        if(__builtin_expect(d != invalid, true)){
+          return d;
         }
-        else{
-          __atomic_store_n(&at_wrap(data, c), invalid, __ATOMIC_SEQ_CST);
-        }
-
-        return d;
-      #else
-        #error ?
-      #endif
+        // its almost impossible to come here. so no relax needed.
+      }
     }
   };
 
