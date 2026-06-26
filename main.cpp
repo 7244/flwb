@@ -34,7 +34,7 @@ struct flwb_t{
 
   struct alignas(std::hardware_destructive_interference_size){
     uint32_t current_block = 0;
-    uint32_t block_size;
+    uint32_t block_size = data_per_block;
 
     uint32_t block_index[2];
   }thread_data[t_max_threads];
@@ -142,7 +142,6 @@ struct flwb_t{
     }
 
     for(auto i = t_max_threads; i--;){
-      thread_data[i].block_size = data_per_block;
       thread_data[i].block_index[0] = ring_full.consume_confident();
       thread_data[i].block_index[1] = ring_free.consume_confident();
     }
