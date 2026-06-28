@@ -84,9 +84,10 @@ struct flwb_t{
     }
   };
 
-  uint32_t blocks[data_amount / data_per_block + t_max_threads * 2][data_per_block];
   ring_mpmc_t<uint32_t, data_amount / data_per_block> ring_full;
   ring_mpmc_t<uint32_t, data_amount / data_per_block + t_max_threads * 2> ring_free;
+
+  uint32_t blocks[data_amount / data_per_block + t_max_threads * 2][data_per_block];
 
   uint32_t consume_unsafe(uintptr_t thread_index){
     auto& td = thread_data[thread_index];
