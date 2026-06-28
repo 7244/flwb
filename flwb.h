@@ -32,10 +32,9 @@ struct flwb_t{
   }
 
   struct alignas(std::hardware_destructive_interference_size){
-    uint32_t current_block_index;
-    uint32_t block_size = data_per_block;
-
+    uint32_t *current_block_ptr;
     uint32_t block_index[2];
+    uint32_t block_size = data_per_block;
   }thread_data[t_max_threads];
 
   template <typename T, uintptr_t t_size>
@@ -98,33 +97,33 @@ struct flwb_t{
     auto& td = thread_data[thread_index];
     while(td.block_size == 0){
       td.block_size = data_per_block;
-      if(td.current_block_index != td.block_index[0]){
-        td.current_block_index = td.block_index[0];
+      if(td.current_block_ptr != blocks[td.block_index[0]]){
+        td.current_block_ptr = blocks[td.block_index[0]];
         break;
       }
-      ring_free.produce_unsafe(ring_free_cold_data, td.current_block_index);
-      td.current_block_index = ring_full.consume_unsafe(ring_full_cold_data);
-      td.block_index[0] = td.current_block_index;
+      ring_free.produce_unsafe(ring_free_cold_data, td.block_index[0]);
+      td.block_index[0] = ring_full.consume_unsafe(ring_full_cold_data);
+      td.current_block_ptr = blocks[td.block_index[0]];
     }
 
     td.block_size -= 1;
 
-    return blocks[td.current_block_index][td.block_size];
+    return td.current_block_ptr[td.block_size];
   }
   void produce_unsafe(uintptr_t thread_index, uint32_t data_index){
     auto& td = thread_data[thread_index];
     while(td.block_size == data_per_block){
       td.block_size = 0;
-      if(td.current_block_index == td.block_index[0]){
-        td.current_block_index = td.block_index[1];
+      if(td.current_block_ptr == blocks[td.block_index[0]]){
+        td.current_block_ptr = blocks[td.block_index[1]];
         break;
       }
-      ring_full.produce_unsafe(ring_full_cold_data, td.current_block_index);
-      td.current_block_index = ring_free.consume_unsafe(ring_free_cold_data);
-      td.block_index[1] = td.current_block_index;
+      ring_full.produce_unsafe(ring_full_cold_data, td.block_index[1]);
+      td.block_index[1] = ring_free.consume_unsafe(ring_free_cold_data);
+      td.current_block_ptr = blocks[td.block_index[1]];
     }
 
-    blocks[td.current_block_index][td.block_size] = data_index;
+    td.current_block_ptr[td.block_size] = data_index;
 
     td.block_size += 1;
   }
@@ -148,7 +147,7 @@ struct flwb_t{
 
     for(auto i = t_max_threads; i--;){
       thread_data[i].block_index[0] = ring_full.consume_unsafe(ring_full_cold_data);
-      thread_data[i].current_block_index = thread_data[i].block_index[0];
+      thread_data[i].current_block_ptr = blocks[thread_data[i].block_index[0]];
       thread_data[i].block_index[1] = ring_free.consume_unsafe(ring_free_cold_data);
     }
   }
