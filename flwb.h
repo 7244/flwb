@@ -95,7 +95,8 @@ struct flwb_t{
 
   uint32_t consume_unsafe(uintptr_t thread_index){
     auto& td = thread_data[thread_index];
-    while(td.block_size_ptr - td.current_block_ptr == 0){
+
+    if(td.block_size_ptr - td.current_block_ptr == 0) do{
       if(td.current_block_ptr != td.block_index_ptr[0]){
         td.current_block_ptr = td.block_index_ptr[0];
         td.block_size_ptr = td.current_block_ptr + data_per_block;
@@ -108,7 +109,7 @@ struct flwb_t{
       td.block_index_ptr[0] = blocks[ring_full.consume_unsafe(ring_full_cold_data)];
       td.current_block_ptr = td.block_index_ptr[0];
       td.block_size_ptr = td.current_block_ptr + data_per_block;
-    }
+    }while(0);
 
     td.block_size_ptr -= 1;
 
@@ -116,7 +117,8 @@ struct flwb_t{
   }
   void produce_unsafe(uintptr_t thread_index, uint32_t data_index){
     auto& td = thread_data[thread_index];
-    while(td.block_size_ptr - td.current_block_ptr == data_per_block){
+
+    if(td.block_size_ptr - td.current_block_ptr == data_per_block) do{
       if(td.current_block_ptr == td.block_index_ptr[0]){
         td.current_block_ptr = td.block_index_ptr[1];
         td.block_size_ptr = td.current_block_ptr;
@@ -129,7 +131,7 @@ struct flwb_t{
       td.block_index_ptr[1] = blocks[ring_free.consume_unsafe(ring_free_cold_data)];
       td.current_block_ptr = td.block_index_ptr[1];
       td.block_size_ptr = td.current_block_ptr;
-    }
+    }while(0);
 
     *td.block_size_ptr = data_index;
 
