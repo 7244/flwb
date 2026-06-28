@@ -43,12 +43,14 @@ struct flwb_t{
     static constexpr auto invalid = (T)-1;
     static constexpr auto size = t_size;
 
-    uint64_t producer;
-    uint64_t consumer = 0;
+    alignas(std::hardware_destructive_interference_size) uint64_t producer;
+    alignas(std::hardware_destructive_interference_size) uint64_t consumer = 0;
 
-    T data[size];
+    struct cold_data_t{
+      T data[size];
+    };
 
-    void produce_unsafe(const T& elem){
+    void produce_unsafe(cold_data_t& cold_data, const T& elem){
       auto p = __atomic_fetch_add(&producer, 1, __ATOMIC_SEQ_CST);
 
       while(1){
@@ -56,7 +58,7 @@ struct flwb_t{
         if(
           __builtin_expect(
             __atomic_compare_exchange_n(
-              &at_wrap(data, p),
+              &at_wrap(cold_data.data, p),
               &expected,
               elem,
               0,
@@ -71,11 +73,11 @@ struct flwb_t{
         // its almost impossible to come here. so no relax needed.
       }
     }
-    T consume_unsafe(){
+    T consume_unsafe(cold_data_t& cold_data){
       auto c = __atomic_fetch_add(&consumer, 1, __ATOMIC_SEQ_CST);
 
       while(1){
-        auto d = __atomic_exchange_n(&at_wrap(data, c), invalid, __ATOMIC_SEQ_CST);
+        auto d = __atomic_exchange_n(&at_wrap(cold_data.data, c), invalid, __ATOMIC_SEQ_CST);
         if(__builtin_expect(d != invalid, true)){
           return d;
         }
@@ -87,6 +89,9 @@ struct flwb_t{
   ring_mpmc_t<uint32_t, data_amount / data_per_block> ring_full;
   ring_mpmc_t<uint32_t, data_amount / data_per_block + t_max_threads * 2> ring_free;
 
+  decltype(ring_full)::cold_data_t ring_full_cold_data;
+  decltype(ring_free)::cold_data_t ring_free_cold_data;
+
   uint32_t blocks[data_amount / data_per_block + t_max_threads * 2][data_per_block];
 
   uint32_t consume_unsafe(uintptr_t thread_index){
@@ -97,8 +102,8 @@ struct flwb_t{
         td.current_block -= 1;
         break;
       }
-      ring_free.produce_unsafe(td.block_index[td.current_block]);
-      td.block_index[td.current_block] = ring_full.consume_unsafe();
+      ring_free.produce_unsafe(ring_free_cold_data, td.block_index[td.current_block]);
+      td.block_index[td.current_block] = ring_full.consume_unsafe(ring_full_cold_data);
     }
 
     td.block_size -= 1;
@@ -113,8 +118,8 @@ struct flwb_t{
         td.current_block += 1;
         break;
       }
-      ring_full.produce_unsafe(td.block_index[td.current_block]);
-      td.block_index[td.current_block] = ring_free.consume_unsafe();
+      ring_full.produce_unsafe(ring_full_cold_data, td.block_index[td.current_block]);
+      td.block_index[td.current_block] = ring_free.consume_unsafe(ring_free_cold_data);
     }
 
     blocks[td.block_index[td.current_block]][td.block_size] = data_index;
@@ -125,7 +130,7 @@ struct flwb_t{
   flwb_t(){
     ring_full.producer = decltype(ring_full)::size;
     for(auto i = ring_full.producer; i--;){
-      ring_full.data[i] = i;
+      ring_full_cold_data.data[i] = i;
       for(auto bi = data_per_block; bi--;){
         blocks[i][bi] = i * data_per_block + bi;
       }
@@ -133,15 +138,15 @@ struct flwb_t{
 
     ring_free.producer = elem_count(blocks) - decltype(ring_full)::size;
     for(auto i = ring_free.producer; i--;){
-      ring_free.data[i] = decltype(ring_full)::size + i;
+      ring_free_cold_data.data[i] = decltype(ring_full)::size + i;
     }
     for(auto i = decltype(ring_free)::size - ring_free.producer; i--;){
-      ring_free.data[ring_free.producer + i] = decltype(ring_free)::invalid;
+      ring_free_cold_data.data[ring_free.producer + i] = decltype(ring_free)::invalid;
     }
 
     for(auto i = t_max_threads; i--;){
-      thread_data[i].block_index[0] = ring_full.consume_unsafe();
-      thread_data[i].block_index[1] = ring_free.consume_unsafe();
+      thread_data[i].block_index[0] = ring_full.consume_unsafe(ring_full_cold_data);
+      thread_data[i].block_index[1] = ring_free.consume_unsafe(ring_free_cold_data);
     }
   }
 
