@@ -34,7 +34,7 @@ struct flwb_t{
   struct alignas(std::hardware_destructive_interference_size){
     uint32_t *current_block_ptr;
     uint32_t *block_index_ptr[2];
-    uint32_t block_size = data_per_block;
+    uint32_t *block_size_ptr;
   }thread_data[t_max_threads];
 
   template <typename T, uintptr_t t_size>
@@ -95,10 +95,10 @@ struct flwb_t{
 
   uint32_t consume_unsafe(uintptr_t thread_index){
     auto& td = thread_data[thread_index];
-    while(td.block_size == 0){
-      td.block_size = data_per_block;
+    while(td.block_size_ptr - td.current_block_ptr == 0){
       if(td.current_block_ptr != td.block_index_ptr[0]){
         td.current_block_ptr = td.block_index_ptr[0];
+        td.block_size_ptr = td.current_block_ptr + data_per_block;
         break;
       }
       ring_free.produce_unsafe(
@@ -107,18 +107,19 @@ struct flwb_t{
       );
       td.block_index_ptr[0] = blocks[ring_full.consume_unsafe(ring_full_cold_data)];
       td.current_block_ptr = td.block_index_ptr[0];
+      td.block_size_ptr = td.current_block_ptr + data_per_block;
     }
 
-    td.block_size -= 1;
+    td.block_size_ptr -= 1;
 
-    return td.current_block_ptr[td.block_size];
+    return *td.block_size_ptr;
   }
   void produce_unsafe(uintptr_t thread_index, uint32_t data_index){
     auto& td = thread_data[thread_index];
-    while(td.block_size == data_per_block){
-      td.block_size = 0;
+    while(td.block_size_ptr - td.current_block_ptr == data_per_block){
       if(td.current_block_ptr == td.block_index_ptr[0]){
         td.current_block_ptr = td.block_index_ptr[1];
+        td.block_size_ptr = td.current_block_ptr;
         break;
       }
       ring_full.produce_unsafe(
@@ -127,11 +128,12 @@ struct flwb_t{
       );
       td.block_index_ptr[1] = blocks[ring_free.consume_unsafe(ring_free_cold_data)];
       td.current_block_ptr = td.block_index_ptr[1];
+      td.block_size_ptr = td.current_block_ptr;
     }
 
-    td.current_block_ptr[td.block_size] = data_index;
+    *td.block_size_ptr = data_index;
 
-    td.block_size += 1;
+    td.block_size_ptr += 1;
   }
 
   flwb_t(){
@@ -154,6 +156,7 @@ struct flwb_t{
     for(auto i = t_max_threads; i--;){
       thread_data[i].block_index_ptr[0] = blocks[ring_full.consume_unsafe(ring_full_cold_data)];
       thread_data[i].current_block_ptr = thread_data[i].block_index_ptr[0];
+      thread_data[i].block_size_ptr = thread_data[i].current_block_ptr + data_per_block;
       thread_data[i].block_index_ptr[1] = blocks[ring_free.consume_unsafe(ring_free_cold_data)];
     }
   }
