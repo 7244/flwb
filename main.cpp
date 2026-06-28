@@ -39,17 +39,15 @@ struct flwb_t{
     uint32_t block_index[2];
   }thread_data[t_max_threads];
 
-  data_t datas[data_amount];
-
   template <typename T, uintptr_t t_size>
   struct ring_mpmc_t{
     static constexpr auto invalid = (T)-1;
     static constexpr auto size = t_size;
 
-    T data[size];
-
     uint64_t producer;
     uint64_t consumer = 0;
+
+    T data[size];
 
     void produce_unsafe(const T& elem){
       auto p = __atomic_fetch_add(&producer, 1, __ATOMIC_SEQ_CST);
@@ -146,6 +144,8 @@ struct flwb_t{
       thread_data[i].block_index[1] = ring_free.consume_unsafe();
     }
   }
+
+  data_t datas[data_amount];
 };
 
 struct pile_t{
