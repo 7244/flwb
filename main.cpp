@@ -41,9 +41,9 @@ struct flwb_t{
 
   data_t datas[data_amount];
 
-  template <typename T, T t_invalid, uintptr_t t_size>
-  struct ring_pc_t{
-    static constexpr auto invalid = t_invalid;
+  template <typename T, uintptr_t t_size>
+  struct ring_mpmc_t{
+    static constexpr auto invalid = (T)-1;
     static constexpr auto size = t_size;
 
     T data[size];
@@ -51,7 +51,7 @@ struct flwb_t{
     uint64_t producer;
     uint64_t consumer = 0;
 
-    void produce_confident(const T& elem){
+    void produce_unsafe(const T& elem){
       auto p = __atomic_fetch_add(&producer, 1, __ATOMIC_SEQ_CST);
 
       while(1){
@@ -74,7 +74,7 @@ struct flwb_t{
         // its almost impossible to come here. so no relax needed.
       }
     }
-    T consume_confident(){
+    T consume_unsafe(){
       auto c = __atomic_fetch_add(&consumer, 1, __ATOMIC_SEQ_CST);
 
       while(1){
@@ -88,10 +88,10 @@ struct flwb_t{
   };
 
   uint32_t blocks[data_amount / data_per_block + t_max_threads * 2][data_per_block];
-  ring_pc_t<uint32_t, (uint32_t)-1, data_amount / data_per_block> ring_full;
-  ring_pc_t<uint32_t, (uint32_t)-1, data_amount / data_per_block + t_max_threads * 2> ring_free;
+  ring_mpmc_t<uint32_t, data_amount / data_per_block> ring_full;
+  ring_mpmc_t<uint32_t, data_amount / data_per_block + t_max_threads * 2> ring_free;
 
-  uint32_t consume_confident(uintptr_t thread_index){
+  uint32_t consume_unsafe(uintptr_t thread_index){
     auto& td = thread_data[thread_index];
     while(td.block_size == 0){
       td.block_size = data_per_block;
@@ -99,15 +99,15 @@ struct flwb_t{
         td.current_block -= 1;
         break;
       }
-      ring_free.produce_confident(td.block_index[td.current_block]);
-      td.block_index[td.current_block] = ring_full.consume_confident();
+      ring_free.produce_unsafe(td.block_index[td.current_block]);
+      td.block_index[td.current_block] = ring_full.consume_unsafe();
     }
 
     td.block_size -= 1;
 
     return blocks[td.block_index[td.current_block]][td.block_size];
   }
-  void produce_confident(uintptr_t thread_index, uint32_t data_index){
+  void produce_unsafe(uintptr_t thread_index, uint32_t data_index){
     auto& td = thread_data[thread_index];
     while(td.block_size == data_per_block){
       td.block_size = 0;
@@ -115,8 +115,8 @@ struct flwb_t{
         td.current_block += 1;
         break;
       }
-      ring_full.produce_confident(td.block_index[td.current_block]);
-      td.block_index[td.current_block] = ring_free.consume_confident();
+      ring_full.produce_unsafe(td.block_index[td.current_block]);
+      td.block_index[td.current_block] = ring_free.consume_unsafe();
     }
 
     blocks[td.block_index[td.current_block]][td.block_size] = data_index;
@@ -142,8 +142,8 @@ struct flwb_t{
     }
 
     for(auto i = t_max_threads; i--;){
-      thread_data[i].block_index[0] = ring_full.consume_confident();
-      thread_data[i].block_index[1] = ring_free.consume_confident();
+      thread_data[i].block_index[0] = ring_full.consume_unsafe();
+      thread_data[i].block_index[1] = ring_free.consume_unsafe();
     }
   }
 };
