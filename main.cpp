@@ -42,10 +42,16 @@ void worker(uint32_t thread_index){
 }
 
 int main(){
-  pile = (pile_t *)__generic_mmap(sizeof(pile_t));
-  if((uintptr_t)pile > (uintptr_t)-0x1000){
+  constexpr auto raw_mmap_size = sizeof(pile_t) + (alignof(pile_t) > 4096 ? alignof(pile_t) - 4096 : 0);
+  auto mmap_ret = __generic_mmap(raw_mmap_size);
+  if((uintptr_t)mmap_ret > (uintptr_t)-0x1000){
     __abort();
   }
+  pile = (pile_t *)(
+    (uintptr_t)mmap_ret % alignof(pile_t) ?
+    (uintptr_t)mmap_ret + (alignof(pile_t) - (uintptr_t)mmap_ret % alignof(pile_t)) :
+    (uintptr_t)mmap_ret
+  );
   new (pile) pile_t;
 
   std::thread threads[MAX_THREADS];
