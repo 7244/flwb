@@ -12,32 +12,20 @@ template<
   uintptr_t t_block_total_divisor
 >
 struct flwb_t{
-  constexpr static auto abs(auto v){
-    return v < 0 ? -v : v;
-  }
+  static constexpr auto data_per_block = []{
+    constexpr auto n =
+      (t_data_amount - 1) /
+      (t_max_threads * t_block_total_divisor) + 1;
 
-  static constexpr auto _data_amount0 =
-    (
-      t_data_amount % (t_max_threads * t_block_total_divisor) ?
-        (t_max_threads * t_block_total_divisor) -
-        (t_data_amount % (t_max_threads * t_block_total_divisor))
-      :
-        0
-    ) +
-    t_data_amount
-  ;
-  static constexpr auto _data_per_block0 = _data_amount0 / (t_max_threads * t_block_total_divisor);
-  static constexpr auto data_per_block =
-    abs((ptrdiff_t)std::bit_ceil(_data_per_block0) - (ptrdiff_t)_data_per_block0) <
-    abs((ptrdiff_t)std::bit_floor(_data_per_block0) - (ptrdiff_t)_data_per_block0) ?
-    std::bit_ceil(_data_per_block0) :
-    std::bit_floor(_data_per_block0)
-  ;
-  static constexpr auto data_amount =
-    t_data_amount / data_per_block * data_per_block +
-    !!(t_data_amount % data_per_block) * data_per_block +
-    data_per_block * t_max_threads
-  ;
+    constexpr auto lower = std::bit_floor(n);
+
+    return n - lower > lower / 2 ? lower * 2 : lower;
+  }();
+
+  static constexpr auto data_amount = (
+    (t_data_amount - 1) / data_per_block +
+    2 * t_max_threads - 1
+  ) * data_per_block;
 
   static auto elem_count(auto& a){
     return sizeof(a) / sizeof(a[0]);
