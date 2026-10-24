@@ -32,6 +32,8 @@ struct flwb_t{
     (2 + t_flwb_settings.implement_safe_consume) * t_max_threads - 1 - t_flwb_settings.implement_safe_consume
   ) * data_per_block;
 
+  static constexpr auto block_count = data_amount / data_per_block + t_max_threads * 2 - 1;
+
   static auto elem_count(auto& a){
     return sizeof(a) / sizeof(a[0]);
   }
@@ -96,12 +98,12 @@ struct flwb_t{
   };
 
   ring_mpmc_t<uint32_t, data_amount / data_per_block> ring_full;
-  ring_mpmc_t<uint32_t, data_amount / data_per_block + t_max_threads * 2> ring_free;
+  ring_mpmc_t<uint32_t, block_count - t_max_threads> ring_free;
 
   decltype(ring_full)::cold_data_t ring_full_cold_data;
   decltype(ring_free)::cold_data_t ring_free_cold_data;
 
-  uint32_t blocks[data_amount / data_per_block + t_max_threads * 2][data_per_block];
+  uint32_t blocks[block_count][data_per_block];
 
   uint32_t consume(uintptr_t thread_index){
     auto& td = thread_data[thread_index];
