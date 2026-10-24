@@ -31,7 +31,7 @@ void worker(uint32_t thread_index){
     auto limit = std::uniform_int_distribution<decltype(hard_limit)>(0, hard_limit - 1)(gen);
 
     for(auto i = limit; i--;){
-      elems[i] = pile->flwb.consume_unsafe(thread_index);
+      elems[i] = pile->flwb.consume(thread_index);
     }
     for(auto i = limit; i--;){
       pile->flwb.produce(thread_index, elems[i]);

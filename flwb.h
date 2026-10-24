@@ -103,9 +103,7 @@ struct flwb_t{
 
   uint32_t blocks[data_amount / data_per_block + t_max_threads * 2][data_per_block];
 
-  private:
-  template<bool unsafe>
-  uint32_t _consume(uintptr_t thread_index){
+  uint32_t consume(uintptr_t thread_index){
     auto& td = thread_data[thread_index];
 
     if(td.block_size_ptr - td.current_block_ptr == 0) do{
@@ -114,7 +112,7 @@ struct flwb_t{
         td.block_size_ptr = td.current_block_ptr + data_per_block;
         break;
       }
-      if constexpr(unsafe == false){
+      if constexpr(t_flwb_settings.implement_safe_consume){
         auto p = __atomic_load_n(&ring_full.producer, __ATOMIC_SEQ_CST);
         auto c = __atomic_load_n(&ring_full.consumer, __ATOMIC_SEQ_CST);
         if((int64_t)(p - c) < (int64_t)t_max_threads){
@@ -133,13 +131,6 @@ struct flwb_t{
     td.block_size_ptr -= 1;
 
     return *td.block_size_ptr;
-  }
-  public:
-  uint32_t consume(uintptr_t thread_index) requires(t_flwb_settings.implement_safe_consume) {
-    return _consume<false>(thread_index);
-  }
-  uint32_t consume_unsafe(uintptr_t thread_index){
-    return _consume<true>(thread_index);
   }
   void produce(uintptr_t thread_index, uint32_t data_index){
     auto& td = thread_data[thread_index];
