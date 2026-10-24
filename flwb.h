@@ -1,21 +1,26 @@
+// free list with blocks
+
 #pragma once
 
 #include <cstdint>
 #include <new>
 #include <bit>
 
-// free list with blocks
+struct flwb_settings_t{
+  uintptr_t block_total_divisor = 16;
+  bool implement_safe_consume = false;
+};
 template<
   typename data_t,
   uintptr_t t_max_threads,
   uintptr_t t_data_amount,
-  uintptr_t t_block_total_divisor
+  flwb_settings_t t_flwb_settings = {}
 >
 struct flwb_t{
   static constexpr auto data_per_block = []{
     constexpr auto n =
       (t_data_amount - 1) /
-      (t_max_threads * t_block_total_divisor) + 1;
+      (t_max_threads * t_flwb_settings.block_total_divisor) + 1;
 
     constexpr auto lower = std::bit_floor(n);
 
@@ -24,7 +29,7 @@ struct flwb_t{
 
   static constexpr auto data_amount = (
     (t_data_amount - 1) / data_per_block +
-    2 * t_max_threads - 1
+    (2 + t_flwb_settings.implement_safe_consume) * t_max_threads - 1 - t_flwb_settings.implement_safe_consume
   ) * data_per_block;
 
   static auto elem_count(auto& a){
@@ -40,9 +45,11 @@ struct flwb_t{
     uint32_t *block_size_ptr;
   }thread_data[t_max_threads];
 
+  static constexpr auto invalid = (uint32_t)-1;
+  static_assert(data_amount < invalid);
+
   template <typename T, uintptr_t t_size>
   struct ring_mpmc_t{
-    static constexpr auto invalid = (T)-1;
     static constexpr auto size = t_size;
 
     alignas(std::hardware_destructive_interference_size) uint64_t producer;
@@ -96,7 +103,9 @@ struct flwb_t{
 
   uint32_t blocks[data_amount / data_per_block + t_max_threads * 2][data_per_block];
 
-  uint32_t consume_unsafe(uintptr_t thread_index){
+  private:
+  template<bool unsafe>
+  uint32_t _consume(uintptr_t thread_index){
     auto& td = thread_data[thread_index];
 
     if(td.block_size_ptr - td.current_block_ptr == 0) do{
@@ -105,9 +114,16 @@ struct flwb_t{
         td.block_size_ptr = td.current_block_ptr + data_per_block;
         break;
       }
+      if constexpr(unsafe == false){
+        auto p = __atomic_load_n(&ring_full.producer, __ATOMIC_SEQ_CST);
+        auto c = __atomic_load_n(&ring_full.consumer, __ATOMIC_SEQ_CST);
+        if((int64_t)(p - c) < (int64_t)t_max_threads){
+          return invalid;
+        }
+      }
       ring_free.produce_unsafe(
         ring_free_cold_data,
-        uint32_t(td.block_index_ptr[0] - *blocks) / data_per_block
+        uintptr_t(td.block_index_ptr[0] - *blocks) / data_per_block
       );
       td.block_index_ptr[0] = blocks[ring_full.consume_unsafe(ring_full_cold_data)];
       td.current_block_ptr = td.block_index_ptr[0];
@@ -118,7 +134,14 @@ struct flwb_t{
 
     return *td.block_size_ptr;
   }
-  void produce_unsafe(uintptr_t thread_index, uint32_t data_index){
+  public:
+  uint32_t consume(uintptr_t thread_index) requires(t_flwb_settings.implement_safe_consume) {
+    return _consume<false>(thread_index);
+  }
+  uint32_t consume_unsafe(uintptr_t thread_index){
+    return _consume<true>(thread_index);
+  }
+  void produce(uintptr_t thread_index, uint32_t data_index){
     auto& td = thread_data[thread_index];
 
     if(td.block_size_ptr - td.current_block_ptr == data_per_block) do{
@@ -129,7 +152,7 @@ struct flwb_t{
       }
       ring_full.produce_unsafe(
         ring_full_cold_data,
-        uint32_t(td.block_index_ptr[1] - *blocks) / data_per_block
+        uintptr_t(td.block_index_ptr[1] - *blocks) / data_per_block
       );
       td.block_index_ptr[1] = blocks[ring_free.consume_unsafe(ring_free_cold_data)];
       td.current_block_ptr = td.block_index_ptr[1];
@@ -155,7 +178,7 @@ struct flwb_t{
       ring_free_cold_data.data[i] = decltype(ring_full)::size + i;
     }
     for(auto i = decltype(ring_free)::size - ring_free.producer; i--;){
-      ring_free_cold_data.data[ring_free.producer + i] = decltype(ring_free)::invalid;
+      ring_free_cold_data.data[ring_free.producer + i] = invalid;
     }
 
     for(auto i = t_max_threads; i--;){

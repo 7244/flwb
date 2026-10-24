@@ -11,7 +11,7 @@
 #define MAX_ELEMENTS (1000000)
 
 struct pile_t{
-  flwb_t<uint64_t, MAX_THREADS, MAX_ELEMENTS, 4> flwb;
+  flwb_t<uint64_t, MAX_THREADS, MAX_ELEMENTS> flwb;
   struct alignas(std::hardware_destructive_interference_size){
     uint64_t sum;
   }thread_data[MAX_THREADS];
@@ -34,7 +34,7 @@ void worker(uint32_t thread_index){
       elems[i] = pile->flwb.consume_unsafe(thread_index);
     }
     for(auto i = limit; i--;){
-      pile->flwb.produce_unsafe(thread_index, elems[i]);
+      pile->flwb.produce(thread_index, elems[i]);
     }
 
     __atomic_add_fetch(&pile->thread_data[thread_index].sum, limit, __ATOMIC_SEQ_CST);
