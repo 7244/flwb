@@ -8,7 +8,7 @@
 
 struct flwb_settings_t{
   uintptr_t block_total_divisor = 16;
-  bool implement_safe_consume = false;
+  bool implement_safe_consume = true;
 };
 template<
   typename data_t,
